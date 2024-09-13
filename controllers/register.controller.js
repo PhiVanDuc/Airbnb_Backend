@@ -1,0 +1,176 @@
+const bcrypt = require("bcrypt");
+
+const { 
+    Verification_Token, 
+    Black_List,
+    Provider,
+    User
+} = require("../models/index");
+
+const { 
+    decode_token,
+    create_verification_token,
+} = require("../utils/token");
+
+module.exports = {
+    add_verification_token: async (req, res) => {
+        try {
+            const { email } = req.body;
+
+            if (!email) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Missing email!",
+                });
+            }
+    
+            const token = create_verification_token(email, "5m");
+            const decode = decode_token(token);
+
+            const existingEmail = await Verification_Token.findOne({
+                where: {
+                    email,
+                }
+            });
+
+            if (existingEmail) {
+                await Black_List.create({
+                    token: existingEmail.token,
+                    expiry_time: existingEmail.expiry_time,
+                });
+
+                await Verification_Token.destroy({
+                    where: {
+                        email,
+                    }
+                });
+            }
+
+            await Verification_Token.create({
+                token,
+                email,
+                expiry_time: new Date(+decode.decode.exp * 1000),
+            });
+
+            return res.status(200).json({
+                success: true,
+                token,
+            });
+        } catch (error) {
+            console.log("Error: ", error);
+
+            return res.status(500).json({
+                success: false,
+                message: "Error from server!"
+            });
+        }
+    },
+
+    add_account: async (req, res) => {
+        try {
+            const { formData } = req.body;
+            const { name, email, password, otp, provider } = formData;
+
+            if (!formData) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Missing form data!",
+                });
+            }
+
+            const [toggleProvider] = await Provider.findOrCreate({
+                where: { provider },
+                defaults: {
+                    provider,
+                }
+            });
+
+            // Kiểm tra trong bảng users có tài khoản nào có cùng email và provider với dữ liệu nhận được từ form data hay không
+            const existingUser = await User.findOne({
+                where: {
+                    email,
+                },
+                include: {
+                    model: Provider,
+                    as: "providers",
+                    where: {
+                        provider,
+                    }
+                },
+            });
+
+            if (existingUser) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Account with email already exist!"
+                });
+            }
+
+            // Kiểm tra mã otp có nhận đúng với mã otp được lưu bên trong token hay không
+            const verification_token = await Verification_Token.findOne({
+                where: {
+                    email,
+                }
+            });
+
+            if (verification_token) {
+                const decode = decode_token(verification_token.token);
+
+                if (!decode.success) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "OTP code not available!",
+                    });
+                }
+
+                if (+decode.decode.otp !== +otp) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "OTP code is incorrect!",
+                    });
+                }
+
+                // Bước thêm tài khoản vào db sau khi đã kiểm tra tất cả các trg hợp
+                const hashPassword = bcrypt.hashSync(password, 10);
+
+                await User.create({
+                    fullname: name,
+                    email,
+                    password: hashPassword,
+                    status: true,
+                    provider_id: toggleProvider.id,
+                });
+
+                // Sau khi dùng xong OTP, token chứa OTP đó sẽ đưa bị đưa vào black list và xóa trong verification_token
+                await Black_List.create({
+                    token: verification_token.token,
+                    expiry_time: verification_token.expiry_time,
+                });
+
+                await Verification_Token.destroy({
+                    where: {
+                        token: verification_token.token,
+                    }
+                });
+
+                return res.status(200).json({
+                    success: true,
+                    message: "Account successfully created!",
+                });
+            } else {
+                return res.status(400).json({
+                    success: false,
+                    message: "OTP code does not exist!",
+                });
+            }
+        }
+        catch (error) {
+            console.log("Error: ", error);
+
+            return res.status(500).json({
+                success: false,
+                message: "Error from server!",
+            });
+        }
+    }
+}
