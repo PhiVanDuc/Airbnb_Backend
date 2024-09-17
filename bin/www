@@ -18,7 +18,7 @@ app.set('port', port);
  * Create HTTP server.
  */
 
-server.listen(port);
+// server.listen(port);
 
 /**
  * Listen on provided port, on all network interfaces.

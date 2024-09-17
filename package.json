@@ -2,9 +2,8 @@
   "name": "airbnb-backend",
   "version": "0.0.0",
   "private": true,
-  "packageManager": "npm@9.8.1",
   "scripts": {
-    "start": "node ./bin/www"
+    "start": "nodemon ./bin/www"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",
